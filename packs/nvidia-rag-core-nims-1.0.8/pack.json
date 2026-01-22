@@ -1,0 +1,31 @@
+{
+  "addonType": "system app",
+  "annotations": {
+    "source": "community",
+    "contributor": "spectrocloud",
+    "docsURL": "https://docs.nvidia.com/nim/",
+    "description": "Dynamic model selection based on available GPU memory"
+  },
+  "cloudTypes": ["all"],
+  "displayName": "NVIDIA RAG Core NIMs",
+  "charts": ["charts/nvidia-rag-core-nims-1.0.8.tgz"],
+  "layer": "addon",
+  "name": "nvidia-rag-core-nims",
+  "version": "1.0.8",
+  "constraints": {
+    "dependencies": [
+      {
+        "packName": "nvidia-nim-operator",
+        "layer": "addon",
+        "minVersion": "1.0.0",
+        "type": "optional"
+      },
+      {
+        "packName": "nvidia-gpu-operator",
+        "layer": "addon",
+        "minVersion": "24.6.0",
+        "type": "optional"
+      }
+    ]
+  }
+}

@@ -1,0 +1,257 @@
+{{- if and .Values.llm.enabled (not .Values.llm.useCloud) (not .Values.llm.manualOverride.enabled) .Values.llm.dynamicModelSelection.enabled }}
+---
+# Model Tiers ConfigMap - Defines available Llama models and their requirements
+# Only created when: manualOverride.enabled=false AND dynamicModelSelection.enabled=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-model-tiers
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: llm-model-config
+    app.kubernetes.io/instance: rag
+    app.kubernetes.io/component: model-selector
+data:
+  # Model tier definitions (JSON format for easy parsing)
+  model-tiers.json: |
+    {
+      "tiers": [
+        {
+          "name": "tier-1-compact",
+          "minTotalVRAM": 16000,
+          "maxTotalVRAM": 24999,
+          "model": {
+            "name": "meta/llama-3.1-8b-instruct",
+            "image": "nvcr.io/nim/meta/llama-3.1-8b-instruct",
+            "tag": "latest",
+            "gpuCount": 1,
+            "precision": "fp16",
+            "memoryRequest": "16Gi",
+            "memoryLimit": "24Gi",
+            "cacheSize": "50Gi"
+          },
+          "description": "Llama 3.1 8B - Optimized for single GPU with 16-24GB VRAM"
+        },
+        {
+          "name": "tier-2-standard",
+          "minTotalVRAM": 25000,
+          "maxTotalVRAM": 47999,
+          "model": {
+            "name": "meta/llama-3.1-8b-instruct",
+            "image": "nvcr.io/nim/meta/llama-3.1-8b-instruct",
+            "tag": "latest",
+            "gpuCount": 1,
+            "precision": "fp16",
+            "memoryRequest": "24Gi",
+            "memoryLimit": "32Gi",
+            "cacheSize": "60Gi"
+          },
+          "description": "Llama 3.1 8B - Enhanced memory for better throughput"
+        },
+        {
+          "name": "tier-3-enhanced",
+          "minTotalVRAM": 48000,
+          "maxTotalVRAM": 79999,
+          "model": {
+            "name": "meta/llama-3.1-70b-instruct",
+            "image": "nvcr.io/nim/meta/llama-3.1-70b-instruct",
+            "tag": "latest",
+            "gpuCount": 2,
+            "precision": "fp8",
+            "tensorParallelism": 2,
+            "memoryRequest": "48Gi",
+            "memoryLimit": "64Gi",
+            "cacheSize": "150Gi"
+          },
+          "description": "Llama 3.1 70B - High quality with tensor parallelism across 2 GPUs"
+        },
+        {
+          "name": "tier-4-advanced",
+          "minTotalVRAM": 80000,
+          "maxTotalVRAM": 159999,
+          "model": {
+            "name": "meta/llama-3.1-70b-instruct",
+            "image": "nvcr.io/nim/meta/llama-3.1-70b-instruct",
+            "tag": "latest",
+            "gpuCount": 4,
+            "precision": "fp8",
+            "tensorParallelism": 4,
+            "memoryRequest": "64Gi",
+            "memoryLimit": "96Gi",
+            "cacheSize": "200Gi"
+          },
+          "description": "Llama 3.1 70B - Full performance with 4 GPU tensor parallelism"
+        },
+        {
+          "name": "tier-5-enterprise",
+          "minTotalVRAM": 160000,
+          "maxTotalVRAM": 999999,
+          "model": {
+            "name": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+            "image": "nvcr.io/nim/nvidia/llama-3.3-nemotron-super-49b-v1.5",
+            "tag": "latest",
+            "gpuCount": 4,
+            "precision": "fp8",
+            "tensorParallelism": 4,
+            "memoryRequest": "128Gi",
+            "memoryLimit": "192Gi",
+            "cacheSize": "250Gi"
+          },
+          "description": "Nemotron 49B - Enterprise grade with maximum capability"
+        }
+      ],
+      "fallback": {
+        "name": "meta/llama-3.1-8b-instruct",
+        "image": "nvcr.io/nim/meta/llama-3.1-8b-instruct",
+        "tag": "latest",
+        "gpuCount": 1,
+        "precision": "fp16",
+        "memoryRequest": "16Gi",
+        "memoryLimit": "24Gi",
+        "cacheSize": "50Gi"
+      }
+    }
+---
+# GPU Detection Script ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gpu-detect-script
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: gpu-detect
+    app.kubernetes.io/instance: rag
+    app.kubernetes.io/component: model-selector
+data:
+  detect-and-select.sh: |
+    #!/bin/bash
+    set -e
+
+    echo "=== NVIDIA RAG Dynamic Model Selector ==="
+    echo "Detecting GPU configuration..."
+
+    # Configuration from Helm values
+    MAX_GPU_COUNT=${MAX_GPU_COUNT:-1}
+    echo "Max GPU Count allowed: ${MAX_GPU_COUNT}"
+
+    # Get GPU information
+    GPU_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
+    GPU_MEM_PER_DEVICE=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)
+    GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+
+    # Calculate effective GPU count (limited by maxGpuCount)
+    EFFECTIVE_GPU_COUNT=$GPU_COUNT
+    if [ "$GPU_COUNT" -gt "$MAX_GPU_COUNT" ]; then
+      EFFECTIVE_GPU_COUNT=$MAX_GPU_COUNT
+      echo "Limiting GPU usage to ${MAX_GPU_COUNT} (${GPU_COUNT} available)"
+    fi
+
+    # Calculate total usable VRAM based on effective GPU count
+    TOTAL_VRAM=$((GPU_MEM_PER_DEVICE * EFFECTIVE_GPU_COUNT))
+
+    echo "Detected: ${GPU_COUNT}x ${GPU_NAME}"
+    echo "Memory per GPU: ${GPU_MEM_PER_DEVICE} MiB"
+    echo "Effective GPUs: ${EFFECTIVE_GPU_COUNT}"
+    echo "Usable VRAM: ${TOTAL_VRAM} MiB"
+
+    # Read model tiers
+    TIERS_FILE="/config/model-tiers.json"
+
+    # Select appropriate tier based on total VRAM and GPU count limit
+    SELECTED_TIER=""
+    SELECTED_MODEL=""
+
+    # Parse JSON and select tier (using basic shell parsing for portability)
+    # In production, you might use jq if available
+    if command -v jq &> /dev/null; then
+      echo "Using jq for JSON parsing..."
+
+      # Find matching tier that fits within VRAM AND respects maxGpuCount
+      SELECTED_TIER=$(jq -r --argjson vram "$TOTAL_VRAM" --argjson maxgpu "$MAX_GPU_COUNT" '
+        .tiers | map(select(.minTotalVRAM <= $vram and .maxTotalVRAM >= $vram and .model.gpuCount <= $maxgpu)) | .[0] // null
+      ' "$TIERS_FILE")
+
+      if [ -z "$SELECTED_TIER" ] || [ "$SELECTED_TIER" == "null" ]; then
+        echo "No matching tier found within GPU limits, using fallback..."
+        SELECTED_TIER=$(jq -r '.fallback' "$TIERS_FILE")
+      fi
+
+      # Extract model details
+      MODEL_NAME=$(echo "$SELECTED_TIER" | jq -r '.model.name // .name')
+      MODEL_IMAGE=$(echo "$SELECTED_TIER" | jq -r '.model.image // .image')
+      MODEL_TAG=$(echo "$SELECTED_TIER" | jq -r '.model.tag // .tag')
+      GPU_REQUEST=$(echo "$SELECTED_TIER" | jq -r '.model.gpuCount // .gpuCount')
+      TENSOR_PARALLEL=$(echo "$SELECTED_TIER" | jq -r '.model.tensorParallelism // 1')
+      PRECISION=$(echo "$SELECTED_TIER" | jq -r '.model.precision // "fp16"')
+      MEM_REQUEST=$(echo "$SELECTED_TIER" | jq -r '.model.memoryRequest // "16Gi"')
+      MEM_LIMIT=$(echo "$SELECTED_TIER" | jq -r '.model.memoryLimit // "24Gi"')
+      TIER_NAME=$(echo "$SELECTED_TIER" | jq -r '.name // "unknown"')
+      TIER_DESC=$(echo "$SELECTED_TIER" | jq -r '.description // "Auto-selected model"')
+
+    else
+      echo "jq not found, using fallback tier..."
+      # Fallback: Use Llama 3.1 8B as default
+      MODEL_NAME="meta/llama-3.1-8b-instruct"
+      MODEL_IMAGE="nvcr.io/nim/meta/llama-3.1-8b-instruct"
+      MODEL_TAG="1.8.0"
+      GPU_REQUEST=1
+      TENSOR_PARALLEL=1
+      PRECISION="fp16"
+      MEM_REQUEST="16Gi"
+      MEM_LIMIT="24Gi"
+      TIER_NAME="fallback"
+      TIER_DESC="Fallback to Llama 3.1 8B (jq not available)"
+    fi
+
+    echo ""
+    echo "=== Selected Configuration ==="
+    echo "Tier: ${TIER_NAME}"
+    echo "Description: ${TIER_DESC}"
+    echo "Model: ${MODEL_NAME}"
+    echo "Image: ${MODEL_IMAGE}:${MODEL_TAG}"
+    echo "GPU Count: ${GPU_REQUEST}"
+    echo "Tensor Parallelism: ${TENSOR_PARALLEL}"
+    echo "Precision: ${PRECISION}"
+    echo ""
+
+    # Write configuration to shared volume
+    cat > /model-config/selected-model.env << EOF
+    # Auto-generated by GPU detection init container
+    # Detected: ${GPU_COUNT}x ${GPU_NAME} (${TOTAL_VRAM} MiB total)
+    # Selected Tier: ${TIER_NAME}
+
+    NIM_MODEL_NAME=${MODEL_NAME}
+    NIM_MODEL_IMAGE=${MODEL_IMAGE}
+    NIM_MODEL_TAG=${MODEL_TAG}
+    NIM_GPU_COUNT=${GPU_REQUEST}
+    NIM_TENSOR_PARALLEL=${TENSOR_PARALLEL}
+    NIM_PRECISION=${PRECISION}
+    NIM_MEMORY_REQUEST=${MEM_REQUEST}
+    NIM_MEMORY_LIMIT=${MEM_LIMIT}
+    NIM_SERVED_MODEL_NAME=${MODEL_NAME}
+    EOF
+
+    # Also write as JSON for applications that prefer it
+    cat > /model-config/selected-model.json << EOF
+    {
+      "detected": {
+        "gpuCount": ${GPU_COUNT},
+        "gpuName": "${GPU_NAME}",
+        "vramPerGpu": ${GPU_MEM_PER_DEVICE},
+        "totalVram": ${TOTAL_VRAM}
+      },
+      "selected": {
+        "tierName": "${TIER_NAME}",
+        "modelName": "${MODEL_NAME}",
+        "image": "${MODEL_IMAGE}",
+        "tag": "${MODEL_TAG}",
+        "gpuCount": ${GPU_REQUEST},
+        "tensorParallelism": ${TENSOR_PARALLEL},
+        "precision": "${PRECISION}"
+      }
+    }
+    EOF
+
+    echo "Configuration written to /model-config/"
+    echo "=== GPU Detection Complete ==="
+{{- end }}

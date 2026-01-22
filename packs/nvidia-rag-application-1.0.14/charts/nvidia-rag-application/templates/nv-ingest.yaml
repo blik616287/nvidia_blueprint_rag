@@ -1,0 +1,174 @@
+{{- if .Values.nvIngest.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-nv-ingest-config
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: nv-ingest
+    app.kubernetes.io/instance: rag
+data:
+  # Cloud NIM Endpoints
+  OCR_HTTP_ENDPOINT: {{ .Values.nvIngest.cloudNims.ocr.endpoint | quote }}
+  OCR_INFER_PROTOCOL: {{ .Values.nvIngest.cloudNims.ocr.protocol | quote }}
+  OCR_MODEL_NAME: {{ .Values.nvIngest.cloudNims.ocr.modelName | quote }}
+  YOLOX_HTTP_ENDPOINT: {{ .Values.nvIngest.cloudNims.pageElements.endpoint | quote }}
+  YOLOX_INFER_PROTOCOL: {{ .Values.nvIngest.cloudNims.pageElements.protocol | quote }}
+  YOLOX_GRAPHIC_ELEMENTS_HTTP_ENDPOINT: {{ .Values.nvIngest.cloudNims.graphicElements.endpoint | quote }}
+  YOLOX_GRAPHIC_ELEMENTS_INFER_PROTOCOL: {{ .Values.nvIngest.cloudNims.graphicElements.protocol | quote }}
+  YOLOX_TABLE_STRUCTURE_HTTP_ENDPOINT: {{ .Values.nvIngest.cloudNims.tableStructure.endpoint | quote }}
+  YOLOX_TABLE_STRUCTURE_INFER_PROTOCOL: {{ .Values.nvIngest.cloudNims.tableStructure.protocol | quote }}
+
+  # NemoRetriever Parse (for PDF extraction with VLM)
+  NEMORETRIEVER_PARSE_HTTP_ENDPOINT: {{ .Values.nvIngest.cloudNims.nemoretrieverParse.endpoint | quote }}
+  NEMORETRIEVER_PARSE_INFER_PROTOCOL: {{ .Values.nvIngest.cloudNims.nemoretrieverParse.protocol | quote }}
+  NEMORETRIEVER_PARSE_MODEL_NAME: {{ .Values.nvIngest.cloudNims.nemoretrieverParse.modelName | quote }}
+
+  # PaddleOCR (for table extraction)
+  PADDLE_HTTP_ENDPOINT: {{ .Values.nvIngest.cloudNims.paddle.endpoint | quote }}
+  PADDLE_INFER_PROTOCOL: {{ .Values.nvIngest.cloudNims.paddle.protocol | quote }}
+
+  # Audio extraction
+  AUDIO_HTTP_ENDPOINT: {{ .Values.nvIngest.cloudNims.audio.endpoint | quote }}
+  AUDIO_INFER_PROTOCOL: {{ .Values.nvIngest.cloudNims.audio.protocol | quote }}
+
+  # Local Service References
+  EMBEDDING_NIM_ENDPOINT: {{ printf "http://%s" .Values.global.services.embedding | quote }}
+  EMBEDDING_NIM_MODEL_NAME: "nvidia/llama-3.2-nv-embedqa-1b-v2"
+  MESSAGE_CLIENT_HOST: {{ (split ":" .Values.global.services.redis)._0 | quote }}
+  MESSAGE_CLIENT_PORT: {{ (split ":" .Values.global.services.redis)._1 | default "6379" | quote }}
+  MESSAGE_CLIENT_TYPE: "redis"
+  MINIO_INTERNAL_ADDRESS: {{ .Values.global.services.minio | quote }}
+  NVINGEST_MINIO_BUCKET: "nv-ingest"
+
+  # Extraction Settings
+  NV_INGEST_EXTRACT_TEXT: {{ .Values.nvIngest.config.extraction.text | quote }}
+  NV_INGEST_EXTRACT_TABLES: {{ .Values.nvIngest.config.extraction.tables | quote }}
+  NV_INGEST_EXTRACT_CHARTS: {{ .Values.nvIngest.config.extraction.charts | quote }}
+  NV_INGEST_EXTRACT_INFOGRAPHICS: {{ .Values.nvIngest.config.extraction.infographics | quote }}
+  NV_INGEST_EXTRACT_IMAGES: {{ .Values.nvIngest.config.extraction.images | quote }}
+  NV_INGEST_EXTRACT_PAGE_AS_IMAGE: {{ .Values.nvIngest.config.extraction.pageAsImage | quote }}
+  NV_INGEST_TEXT_DEPTH: {{ .Values.nvIngest.config.extraction.textDepth | quote }}
+
+  # PDF Processing
+  APP_NVINGEST_ENABLEPDFSPLITTER: {{ .Values.nvIngest.config.pdf.enableSplitter | quote }}
+  APP_NVINGEST_PDFEXTRACTMETHOD: {{ .Values.nvIngest.config.pdf.extractMethod | quote }}
+  PDF_SPLIT_PAGE_COUNT: {{ .Values.nvIngest.config.pdf.splitPageCount | quote }}
+
+  # Chunking
+  APP_NVINGEST_CHUNKSIZE: {{ .Values.nvIngest.config.chunking.size | quote }}
+  APP_NVINGEST_CHUNKOVERLAP: {{ .Values.nvIngest.config.chunking.overlap | quote }}
+
+  # Performance
+  MAX_INGEST_PROCESS_WORKERS: {{ .Values.nvIngest.config.performance.maxWorkers | quote }}
+  NV_INGEST_FILES_PER_BATCH: {{ .Values.nvIngest.config.performance.filesPerBatch | quote }}
+  NV_INGEST_CONCURRENT_BATCHES: {{ .Values.nvIngest.config.performance.concurrentBatches | quote }}
+  # NV_INGEST_MAX_UTIL removed - causes string/int type error in nv-ingest 25.3.0
+
+  # Runtime
+  CUDA_VISIBLE_DEVICES: "-1"
+  LOGLEVEL: "INFO"
+
+  # CPU count fix for nv-ingest 25.3.0 bug
+  NV_INGEST_DEFAULT_CPU_COUNT: {{ .Values.nvIngest.config.performance.defaultCpuCount | default 4 | quote }}
+  DEFAULT_CPU_COUNT: {{ .Values.nvIngest.config.performance.defaultCpuCount | default 4 | quote }}
+---
+# NV-Ingest Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-nv-ingest
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: nv-ingest
+    app.kubernetes.io/instance: rag
+    app.kubernetes.io/component: document-processing
+spec:
+  replicas: {{ .Values.nvIngest.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nv-ingest
+      app.kubernetes.io/instance: rag
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nv-ingest
+        app.kubernetes.io/instance: rag
+        app.kubernetes.io/component: document-processing
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: nv-ingest
+          image: "{{ .Values.nvIngest.image.repository }}:{{ .Values.nvIngest.image.tag }}"
+          imagePullPolicy: {{ .Values.nvIngest.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: rag-nv-ingest-config
+          env:
+            - name: NGC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ngc-api-key
+                  key: NGC_API_KEY
+            - name: NVIDIA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ngc-api-key
+                  key: NVIDIA_API_KEY
+            # nv-ingest 25.3.0 uses NVIDIA_BUILD_API_KEY for cloud NIM auth
+            - name: NVIDIA_BUILD_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ngc-api-key
+                  key: NVIDIA_API_KEY
+          ports:
+            - name: http
+              containerPort: 7670
+              protocol: TCP
+            - name: broker
+              containerPort: 7671
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.nvIngest.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /v1/health/ready
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /v1/health/ready
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+---
+# NV-Ingest Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-nv-ingest
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: nv-ingest
+    app.kubernetes.io/instance: rag
+spec:
+  type: {{ .Values.nvIngest.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.nvIngest.service.httpPort }}
+      targetPort: http
+      protocol: TCP
+    - name: broker
+      port: {{ .Values.nvIngest.service.brokerPort }}
+      targetPort: broker
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: nv-ingest
+    app.kubernetes.io/instance: rag
+{{- end }}

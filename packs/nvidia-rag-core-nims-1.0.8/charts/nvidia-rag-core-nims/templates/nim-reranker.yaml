@@ -1,0 +1,151 @@
+{{- if and .Values.reranker.enabled (not .Values.reranker.useCloud) }}
+---
+# Reranker NIM PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.reranker.nimService.name }}-cache
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.reranker.nimService.name }}
+    app.kubernetes.io/instance: rag
+    app.kubernetes.io/component: reranker
+spec:
+  accessModes:
+    - {{ .Values.reranker.nimService.storage.pvc.accessMode }}
+  storageClassName: {{ .Values.reranker.nimService.storage.pvc.storageClass | default .Values.global.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.reranker.nimService.storage.pvc.size }}
+---
+# Reranker NIM Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.reranker.nimService.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.reranker.nimService.name }}
+    app.kubernetes.io/instance: rag
+    app.kubernetes.io/component: reranker
+    nvidia.com/nim: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.reranker.nimService.name }}
+      app.kubernetes.io/instance: rag
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Values.reranker.nimService.name }}
+        app.kubernetes.io/instance: rag
+        app.kubernetes.io/component: reranker
+        nvidia.com/nim: "true"
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.reranker.nimService.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.reranker.nimService.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: nim-reranker
+          image: "{{ .Values.reranker.nimService.image.repository }}:{{ .Values.reranker.nimService.image.tag }}"
+          imagePullPolicy: {{ .Values.reranker.nimService.image.pullPolicy }}
+          env:
+            - name: NGC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ngcApiSecret.name }}
+                  key: NGC_API_KEY
+            {{- range .Values.reranker.nimService.env }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+            - name: metrics
+              containerPort: 8002
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.reranker.nimService.resources | nindent 12 }}
+          volumeMounts:
+            - name: model-cache
+              mountPath: /opt/nim/.cache
+            - name: dshm
+              mountPath: /dev/shm
+          livenessProbe:
+            httpGet:
+              path: /v1/health/live
+              port: http
+            initialDelaySeconds: {{ .Values.reranker.nimService.healthCheck.initialDelaySeconds }}
+            periodSeconds: {{ .Values.reranker.nimService.healthCheck.periodSeconds }}
+            timeoutSeconds: {{ .Values.reranker.nimService.healthCheck.timeoutSeconds }}
+          readinessProbe:
+            httpGet:
+              path: /v1/health/ready
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: {{ .Values.reranker.nimService.name }}-cache
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.reranker.nimService.storage.sharedMemorySizeLimit }}
+---
+# Reranker NIM Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.reranker.nimService.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.reranker.nimService.name }}
+    app.kubernetes.io/instance: rag
+    app.kubernetes.io/component: reranker
+spec:
+  type: {{ .Values.reranker.nimService.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.reranker.nimService.service.port }}
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 8002
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: {{ .Values.reranker.nimService.name }}
+    app.kubernetes.io/instance: rag
+{{- end }}
+
+{{- if .Values.reranker.useCloud }}
+---
+# Reranker Cloud Endpoint ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: reranker-cloud-config
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: reranker-cloud
+    app.kubernetes.io/instance: rag
+data:
+  RERANKER_ENDPOINT: {{ .Values.reranker.cloudEndpoint | quote }}
+  RERANKER_MODEL: {{ .Values.reranker.nimService.model.name | quote }}
+{{- end }}

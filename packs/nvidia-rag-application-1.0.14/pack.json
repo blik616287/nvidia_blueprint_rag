@@ -1,0 +1,30 @@
+{
+  "addonType": "app services",
+  "annotations": {
+    "source": "community",
+    "contributor": "spectrocloud",
+    "docsURL": "https://docs.nvidia.com/nemo/guardrails/"
+  },
+  "cloudTypes": ["all"],
+  "displayName": "NVIDIA RAG Application",
+  "charts": ["charts/nvidia-rag-application-1.0.14.tgz"],
+  "layer": "addon",
+  "name": "nvidia-rag-application",
+  "version": "1.0.14",
+  "constraints": {
+    "dependencies": [
+      {
+        "packName": "nvidia-rag-core-nims",
+        "layer": "addon",
+        "minVersion": "1.0.0",
+        "type": "required"
+      },
+      {
+        "packName": "nvidia-rag-data-infrastructure",
+        "layer": "addon",
+        "minVersion": "1.0.0",
+        "type": "required"
+      }
+    ]
+  }
+}

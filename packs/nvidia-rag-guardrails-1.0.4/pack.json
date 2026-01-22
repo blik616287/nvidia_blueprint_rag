@@ -1,0 +1,24 @@
+{
+  "addonType": "system app",
+  "annotations": {
+    "source": "community",
+    "contributor": "spectrocloud",
+    "docsURL": "https://docs.nvidia.com/nemo/guardrails/"
+  },
+  "cloudTypes": ["all"],
+  "displayName": "NVIDIA RAG Guardrails",
+  "charts": ["charts/nvidia-rag-guardrails-1.0.4.tgz"],
+  "layer": "addon",
+  "name": "nvidia-rag-guardrails",
+  "version": "1.0.4",
+  "constraints": {
+    "dependencies": [
+      {
+        "packName": "nvidia-rag-application",
+        "layer": "addon",
+        "minVersion": "1.0.0",
+        "type": "optional"
+      }
+    ]
+  }
+}

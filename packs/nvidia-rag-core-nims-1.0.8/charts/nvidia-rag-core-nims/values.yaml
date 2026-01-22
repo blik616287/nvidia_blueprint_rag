@@ -1,0 +1,200 @@
+# NVIDIA RAG Core NIMs - Default Helm Values
+# Version 1.0.3 with Dynamic Model Selection
+
+global:
+  namespace: "nvidia-rag"
+  storageClass: ""
+  ngcApiKey: ""
+  nvidiaApiKey: ""  # For cloud NIM APIs (ai.api.nvidia.com)
+  imagePullSecrets:
+    - name: ngc-pull-secret
+
+ngcPullSecret:
+  create: true
+  name: "ngc-pull-secret"
+  registry: "nvcr.io"
+  username: "$oauthtoken"
+
+ngcApiSecret:
+  create: true
+  name: "ngc-api-key"
+
+# LLM NIM Configuration with Dynamic Model Selection
+llm:
+  enabled: true
+  useCloud: false
+  cloudEndpoint: "https://integrate.api.nvidia.com/v1"
+
+  # =============================================================
+  # Model Selection Priority (NEW in 1.0.3):
+  # 1. Manual Override (if manualOverride.enabled=true)
+  # 2. Dynamic Selection (if dynamicModelSelection.enabled=true)
+  # 3. Fallback to Llama 3.1 8B
+  # =============================================================
+
+  # Manual Override - Takes precedence over everything
+  # Use this when you want to specify an exact model for your deployment
+  manualOverride:
+    enabled: false
+    # Specify the exact model to use (only applied if enabled=true)
+    model:
+      name: "meta/llama-3.1-8b-instruct"
+      image: "nvcr.io/nim/meta/llama-3.1-8b-instruct"
+      tag: "latest"
+      gpuCount: 1
+      tensorParallelism: 1
+      precision: "fp16"
+
+  # Dynamic Model Selection - Auto-detect GPU and select best model
+  # Only used if manualOverride.enabled=false
+  dynamicModelSelection:
+    enabled: true
+    # Maximum number of GPUs to use for the LLM model
+    # Set to 1 for single-GPU deployments (default)
+    # Set to 2, 4, or 8 to enable multi-GPU tensor parallelism
+    maxGpuCount: 1
+    # Fallback model used if GPU detection fails
+    defaultModel: "meta/llama-3.1-8b-instruct"
+    defaultImage: "nvcr.io/nim/meta/llama-3.1-8b-instruct"
+    defaultTag: "1.8.0"
+    # Image used for GPU detection init container
+    detectorImage: "nvcr.io/nvidia/cuda:12.4.0-base-ubuntu22.04"
+
+  nimService:
+    name: "nim-llm"
+    image:
+      # Used when dynamicModelSelection.enabled is false
+      repository: "nvcr.io/nim/meta/llama-3.1-8b-instruct"
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    model:
+      name: "meta/llama-3.1-8b-instruct"
+      engine: "tensorrt_llm"
+      precision: "fp16"
+      qosProfile: "throughput"
+    resources:
+      requests:
+        memory: "16Gi"
+        cpu: "4"
+      limits:
+        memory: "24Gi"
+        cpu: "8"
+        nvidia.com/gpu: 1
+    storage:
+      pvc:
+        create: true
+        storageClass: ""
+        size: "60Gi"
+        accessMode: "ReadWriteOnce"
+      sharedMemorySizeLimit: "16Gi"
+    service:
+      type: ClusterIP
+      port: 8000
+    healthCheck:
+      initialDelaySeconds: 1800
+      periodSeconds: 30
+      timeoutSeconds: 10
+    nodeSelector:
+      nvidia.com/gpu.present: "true"
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+    env:
+      - name: NIM_HTTP_API_PORT
+        value: "8000"
+      - name: NIM_LOG_LEVEL
+        value: "INFO"
+
+# Embedding NIM Configuration
+embedding:
+  enabled: true
+  useCloud: false
+  cloudEndpoint: "https://integrate.api.nvidia.com/v1"
+  nimService:
+    name: "nemoretriever-embedding-ms"
+    image:
+      repository: "nvcr.io/nim/nvidia/llama-3.2-nv-embedqa-1b-v2"
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    model:
+      name: "nvidia/llama-3.2-nv-embedqa-1b-v2"
+      dimensions: 2048
+    resources:
+      requests:
+        memory: "8Gi"
+        cpu: "4"
+      limits:
+        memory: "16Gi"
+        cpu: "8"
+        nvidia.com/gpu: 1
+    storage:
+      pvc:
+        create: true
+        storageClass: ""
+        size: "50Gi"
+        accessMode: "ReadWriteOnce"
+      sharedMemorySizeLimit: "16Gi"
+    service:
+      type: ClusterIP
+      port: 8000
+    healthCheck:
+      initialDelaySeconds: 120
+      periodSeconds: 15
+      timeoutSeconds: 5
+    nodeSelector:
+      nvidia.com/gpu.present: "true"
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+    env:
+      - name: NIM_HTTP_API_PORT
+        value: "8000"
+      - name: NIM_TRITON_PERFORMANCE_MODE
+        value: "throughput"
+
+# Reranker NIM Configuration
+reranker:
+  enabled: true
+  useCloud: false
+  cloudEndpoint: "https://integrate.api.nvidia.com/v1"
+  nimService:
+    name: "nemoretriever-ranking-ms"
+    image:
+      repository: "nvcr.io/nim/nvidia/llama-3.2-nv-rerankqa-1b-v2"
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    model:
+      name: "nvidia/llama-3.2-nv-rerankqa-1b-v2"
+    resources:
+      requests:
+        memory: "8Gi"
+        cpu: "4"
+      limits:
+        memory: "16Gi"
+        cpu: "8"
+        nvidia.com/gpu: 1
+    storage:
+      pvc:
+        create: true
+        storageClass: ""
+        size: "50Gi"
+        accessMode: "ReadWriteOnce"
+      sharedMemorySizeLimit: "16Gi"
+    service:
+      type: ClusterIP
+      port: 8000
+    healthCheck:
+      initialDelaySeconds: 120
+      periodSeconds: 15
+      timeoutSeconds: 5
+    nodeSelector:
+      nvidia.com/gpu.present: "true"
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+    env:
+      - name: NIM_HTTP_API_PORT
+        value: "8000"

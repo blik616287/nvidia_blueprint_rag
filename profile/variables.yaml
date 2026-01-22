@@ -1,0 +1,52 @@
+# Profile Variables for NVIDIA RAG Blueprint
+# Cluster: test2
+#
+# These variables are referenced in pack values using {{.spectro.var.VARIABLE_NAME}} syntax.
+# Set these values when creating or updating the cluster in Spectro Cloud Palette.
+
+# =============================================================================
+# NVIDIA Authentication
+# =============================================================================
+
+# NGC API Key
+# - Purpose: Authentication for pulling container images from nvcr.io
+# - Format: Base64 encoded string (e.g., "ajhyZDR1cHY2ZGU4NWpo...")
+# - Obtain from: https://org.ngc.nvidia.com/setup/api-key
+# - Used by: imagePullSecrets for all NVIDIA container images
+NGC_API_KEY: "<your-ngc-api-key>"
+
+# NVIDIA API Key
+# - Purpose: Authentication for NVIDIA cloud NIM APIs (ai.api.nvidia.com)
+# - Format: Starts with "nvapi-" (e.g., "nvapi-QKqG4TyY...")
+# - Obtain from: https://build.nvidia.com (Generate API Key)
+# - Used by: NV-Ingest for document processing (OCR, page elements, etc.)
+NVIDIA_API_KEY: "<your-nvidia-api-key>"
+
+# =============================================================================
+# MinIO Object Storage
+# =============================================================================
+
+# MinIO Access Key
+# - Purpose: Username for MinIO S3-compatible object storage
+# - Used by: RAG Server, Ingestor Server, NV-Ingest
+MINIO_ACCESS_KEY: "minioadmin"
+
+# MinIO Secret Key
+# - Purpose: Password for MinIO S3-compatible object storage
+# - Used by: RAG Server, Ingestor Server, NV-Ingest
+MINIO_SECRET_KEY: "<your-minio-secret-key>"
+
+# =============================================================================
+# Token Types Summary
+# =============================================================================
+#
+# | Variable        | Format                  | Purpose                          |
+# |-----------------|-------------------------|----------------------------------|
+# | NGC_API_KEY     | Base64 encoded string   | Pull images from nvcr.io         |
+# | NVIDIA_API_KEY  | nvapi-...               | Cloud NIM API access             |
+# | MINIO_ACCESS_KEY| Plain string            | MinIO username                   |
+# | MINIO_SECRET_KEY| Plain string            | MinIO password                   |
+#
+# IMPORTANT: NGC_API_KEY and NVIDIA_API_KEY are DIFFERENT tokens!
+# - NGC token: For container registry authentication
+# - NVIDIA token: For cloud API authentication (document processing)

@@ -1,0 +1,14 @@
+apiVersion: v2
+appVersion: 2.3.0
+description: NVIDIA RAG Application - RAG Server, Ingestor, NV-Ingest, and Frontend
+keywords:
+- nvidia
+- rag
+- ai
+- ml
+- llm
+maintainers:
+- name: spectrocloud
+name: nvidia-rag-application
+type: application
+version: 1.0.14

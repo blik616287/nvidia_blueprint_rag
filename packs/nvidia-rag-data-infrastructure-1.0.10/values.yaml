@@ -1,0 +1,171 @@
+# NVIDIA RAG Data Infrastructure Pack Values
+# This pack deploys Milvus, etcd, MinIO, and Redis for the RAG pipeline
+
+pack:
+  namespace: nvidia-rag
+  spectrocloud.com/install-priority: "10"
+  content:
+    images:
+      - image: milvusdb/milvus:v2.5.8-gpu
+      - image: milvusdb/milvus:v2.5.8
+      - image: milvusdb/etcd:3.5.23-r2
+      - image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+      - image: redis:8.2.1
+      - image: busybox:1.36
+
+# Helm chart values
+charts:
+  nvidia-rag-data-infrastructure:
+    # Global settings
+    global:
+      storageClass: ""
+      namespace: "nvidia-rag"
+
+    # Milvus Vector Database Configuration
+    milvus:
+      enabled: true
+      image:
+        repository: milvusdb/milvus
+        tag: "v2.5.8-gpu"
+        pullPolicy: IfNotPresent
+      standalone:
+        enabled: true
+        replicas: 1
+        resources:
+          requests:
+            memory: "8Gi"
+            cpu: "4"
+          limits:
+            memory: "16Gi"
+            cpu: "8"
+            nvidia.com/gpu: 1
+        nodeSelector:
+          nvidia.com/gpu.present: "true"
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+      gpu:
+        enabled: true
+        extraEnvVars:
+          - name: KNOWHERE_GPU_MEM_POOL_SIZE
+            value: "2048;4096"
+      persistence:
+        enabled: true
+        storageClass: ""
+        size: "100Gi"
+        accessMode: ReadWriteOnce
+      indexConfig:
+        indexType: "GPU_CAGRA"
+        metricType: "L2"
+      service:
+        type: ClusterIP
+        port: 19530
+        annotations: {}
+      config:
+        rootCoord:
+          dmlChannelNum: 256
+        dataCoord:
+          segment:
+            maxSize: 1024
+        queryCoord:
+          balancer:
+            autoBalance: true
+
+    # etcd Configuration (Milvus Metadata Store)
+    etcd:
+      enabled: true
+      image:
+        repository: milvusdb/etcd
+        tag: "3.5.23-r2"
+        pullPolicy: IfNotPresent
+      replicas: 1
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+        limits:
+          memory: "4Gi"
+          cpu: "2"
+      persistence:
+        enabled: true
+        storageClass: ""
+        size: "20Gi"
+        accessMode: ReadWriteOnce
+      config:
+        autoCompactionMode: "revision"
+        autoCompactionRetention: "1000"
+        quotaBackendBytes: "4294967296"
+      service:
+        type: ClusterIP
+        port: 2379
+
+    # MinIO Object Storage Configuration
+    minio:
+      enabled: true
+      image:
+        repository: minio/minio
+        tag: "RELEASE.2025-09-07T16-13-09Z"
+        pullPolicy: IfNotPresent
+      mode: standalone
+      replicas: 1
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+        limits:
+          memory: "4Gi"
+          cpu: "2"
+      accessKey: "{{.spectro.var.MINIO_ACCESS_KEY}}"
+      secretKey: "{{.spectro.var.MINIO_SECRET_KEY}}"
+      defaultBuckets:
+        - name: "nv-ingest"
+          policy: "none"
+          purge: false
+      persistence:
+        enabled: true
+        storageClass: ""
+        size: "100Gi"
+        accessMode: ReadWriteOnce
+      service:
+        type: ClusterIP
+        port: 9000
+        consolePort: 9001
+      console:
+        enabled: true
+
+    # Redis Configuration (Message Queue)
+    redis:
+      enabled: true
+      image:
+        repository: redis
+        tag: "8.2.1"
+        pullPolicy: IfNotPresent
+      architecture: standalone
+      auth:
+        enabled: false
+      master:
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+        persistence:
+          enabled: true
+          storageClass: ""
+          size: "10Gi"
+          accessMode: ReadWriteOnce
+      service:
+        type: ClusterIP
+        port: 6379
+
+    # Network Policies (Optional)
+    networkPolicy:
+      enabled: false
+
+    # Pod Disruption Budgets (Production)
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1

@@ -1,0 +1,209 @@
+{{- if .Values.ragServer.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-server-config
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: rag-server
+    app.kubernetes.io/instance: rag
+data:
+  # LLM settings
+  APP_LLM_SERVERURL: {{ .Values.ragServer.config.llm.serverUrl | default .Values.global.services.llm | quote }}
+  # APP_LLM_MODELNAME is auto-detected from NIM at startup
+  LLM_MAX_TOKENS: {{ .Values.ragServer.config.llm.maxTokens | quote }}
+  LLM_TEMPERATURE: {{ .Values.ragServer.config.llm.temperature | quote }}
+  LLM_TOP_P: {{ .Values.ragServer.config.llm.topP | quote }}
+
+  # Embedding settings
+  APP_EMBEDDINGS_SERVERURL: {{ .Values.ragServer.config.embedding.serverUrl | default .Values.global.services.embedding | quote }}
+  # APP_EMBEDDINGS_MODELNAME is auto-detected from NIM at startup
+  APP_EMBEDDINGS_DIMENSIONS: {{ .Values.ragServer.config.embedding.dimensions | quote }}
+
+  # Reranker settings
+  APP_RANKING_SERVERURL: {{ .Values.ragServer.config.reranker.serverUrl | default .Values.global.services.reranker | quote }}
+  # APP_RANKING_MODELNAME is auto-detected from NIM at startup
+  ENABLE_RERANKER: {{ .Values.ragServer.config.features.enableReranker | quote }}
+  RERANKER_CONFIDENCE_THRESHOLD: {{ .Values.ragServer.config.reranker.confidenceThreshold | quote }}
+
+  # Vector store settings
+  APP_VECTORSTORE_URL: {{ printf "http://%s" (.Values.ragServer.config.vectorStore.url | default .Values.global.services.milvus) | quote }}
+  APP_VECTORSTORE_NAME: {{ .Values.ragServer.config.vectorStore.name | quote }}
+  APP_VECTORSTORE_INDEXTYPE: {{ .Values.ragServer.config.vectorStore.indexType | quote }}
+  APP_VECTORSTORE_SEARCHTYPE: {{ .Values.ragServer.config.vectorStore.searchType | quote }}
+  APP_VECTORSTORE_ENABLEGPUSEARCH: {{ .Values.ragServer.config.vectorStore.enableGpuSearch | quote }}
+  APP_VECTORSTORE_ENABLEGPUINDEX: {{ .Values.ragServer.config.vectorStore.enableGpuIndex | quote }}
+  VECTOR_DB_TOPK: {{ .Values.ragServer.config.vectorStore.topK | quote }}
+
+  # Retriever settings
+  APP_RETRIEVER_TOPK: {{ .Values.ragServer.config.retriever.topK | quote }}
+  APP_RETRIEVER_SCORETHRESHOLD: {{ .Values.ragServer.config.retriever.scoreThreshold | quote }}
+
+  # MinIO settings
+  MINIO_ENDPOINT: {{ .Values.global.services.minio | quote }}
+  MINIO_ACCESSKEY: {{ .Values.global.minio.accessKey | quote }}
+  MINIO_SECRETKEY: {{ .Values.global.minio.secretKey | quote }}
+
+  # Redis settings
+  REDIS_HOST: {{ (split ":" .Values.global.services.redis)._0 | quote }}
+  REDIS_PORT: {{ (split ":" .Values.global.services.redis)._1 | default "6379" | quote }}
+
+  # Feature flags
+  ENABLE_CITATIONS: {{ .Values.ragServer.config.features.enableCitations | quote }}
+  ENABLE_SOURCE_METADATA: {{ .Values.ragServer.config.features.enableSourceMetadata | quote }}
+  ENABLE_GUARDRAILS: {{ .Values.ragServer.config.features.enableGuardrails | quote }}
+  ENABLE_VLM_INFERENCE: {{ .Values.ragServer.config.features.enableVlmInference | quote }}
+  ENABLE_REFLECTION: {{ .Values.ragServer.config.features.enableReflection | quote }}
+  ENABLE_QUERY_DECOMPOSITION: {{ .Values.ragServer.config.features.enableQueryDecomposition | quote }}
+  FILTER_THINK_TOKENS: {{ .Values.ragServer.config.features.filterThinkTokens | quote }}
+
+  # Tracing
+  APP_TRACING_ENABLED: {{ .Values.ragServer.config.tracing.enabled | quote }}
+  {{- if .Values.ragServer.config.tracing.enabled }}
+  APP_TRACING_OTLPHTTPENDPOINT: {{ .Values.ragServer.config.tracing.otlpHttpEndpoint | quote }}
+  {{- end }}
+
+  # Logging
+  LOGLEVEL: "INFO"
+---
+# RAG Server Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-server
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: rag-server
+    app.kubernetes.io/instance: rag
+    app.kubernetes.io/component: orchestrator
+spec:
+  replicas: {{ .Values.ragServer.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rag-server
+      app.kubernetes.io/instance: rag
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rag-server
+        app.kubernetes.io/instance: rag
+        app.kubernetes.io/component: orchestrator
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: detect-models
+          image: curlimages/curl:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "=== Auto-detecting NIM models ==="
+              LLM_URL="{{ .Values.ragServer.config.llm.serverUrl | default .Values.global.services.llm }}"
+              EMB_URL="{{ .Values.ragServer.config.embedding.serverUrl | default .Values.global.services.embedding | replace "/v1" "" }}"
+              RANK_URL="{{ .Values.ragServer.config.reranker.serverUrl | default .Values.global.services.reranker }}"
+
+              # Wait for and detect LLM model
+              echo "Waiting for LLM NIM at $LLM_URL..."
+              until curl -sf "http://$LLM_URL/v1/models" > /tmp/llm.json 2>/dev/null; do sleep 5; done
+              LLM_MODEL=$(cat /tmp/llm.json | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+              echo "Detected LLM: $LLM_MODEL"
+
+              # Wait for and detect Embedding model
+              echo "Waiting for Embedding NIM at $EMB_URL..."
+              until curl -sf "http://$EMB_URL/v1/models" > /tmp/emb.json 2>/dev/null; do sleep 5; done
+              EMB_MODEL=$(cat /tmp/emb.json | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+              echo "Detected Embedding: $EMB_MODEL"
+
+              # Wait for and detect Reranker model
+              echo "Waiting for Reranker NIM at $RANK_URL..."
+              until curl -sf "http://$RANK_URL/v1/models" > /tmp/rank.json 2>/dev/null; do sleep 5; done
+              RANK_MODEL=$(cat /tmp/rank.json | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+              echo "Detected Reranker: $RANK_MODEL"
+
+              # Write to shared volume
+              echo "export APP_LLM_MODELNAME=\"$LLM_MODEL\"" > /model-config/models.env
+              echo "export APP_EMBEDDINGS_MODELNAME=\"$EMB_MODEL\"" >> /model-config/models.env
+              echo "export APP_RANKING_MODELNAME=\"$RANK_MODEL\"" >> /model-config/models.env
+
+              echo "=== Model detection complete ==="
+              cat /model-config/models.env
+          volumeMounts:
+            - name: model-config
+              mountPath: /model-config
+      containers:
+        - name: rag-server
+          image: "{{ .Values.ragServer.image.repository }}:{{ .Values.ragServer.image.tag }}"
+          imagePullPolicy: {{ .Values.ragServer.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Loading auto-detected model names..."
+              . /model-config/models.env
+              echo "LLM Model: $APP_LLM_MODELNAME"
+              echo "Embedding Model: $APP_EMBEDDINGS_MODELNAME"
+              echo "Reranker Model: $APP_RANKING_MODELNAME"
+              exec uvicorn nvidia_rag.rag_server.server:app --host 0.0.0.0 --port 8081
+          envFrom:
+            - configMapRef:
+                name: rag-server-config
+          env:
+            - name: NVIDIA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ngc-api-key
+                  key: NVIDIA_API_KEY
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.ragServer.resources | nindent 12 }}
+          volumeMounts:
+            - name: model-config
+              mountPath: /model-config
+            - name: tmp-data
+              mountPath: /tmp-data
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: model-config
+          emptyDir: {}
+        - name: tmp-data
+          emptyDir: {}
+---
+# RAG Server Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-server
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: rag-server
+    app.kubernetes.io/instance: rag
+spec:
+  type: {{ .Values.ragServer.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.ragServer.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: rag-server
+    app.kubernetes.io/instance: rag
+{{- end }}

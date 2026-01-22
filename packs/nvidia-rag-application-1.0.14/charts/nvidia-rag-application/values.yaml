@@ -1,0 +1,219 @@
+# Default values for nvidia-rag-application
+# This is a YAML-formatted file.
+
+# Global settings
+global:
+  namespace: "nvidia-rag"
+  storageClass: ""
+  ngcApiKey: ""
+  services:
+    llm: "nim-llm:8000"
+    embedding: "nemoretriever-embedding-ms:8000"
+    reranker: "nemoretriever-ranking-ms:8000"
+    milvus: "rag-milvus:19530"
+    minio: "rag-minio:9000"
+    redis: "rag-redis:6379"
+  # MinIO credentials for rag-server and ingestor-server
+  minio:
+    accessKey: "minioadmin"
+    secretKey: "minioadmin"
+  imagePullSecrets:
+    - name: ngc-pull-secret
+
+# RAG Server Configuration
+ragServer:
+  enabled: true
+  image:
+    repository: "nvcr.io/nvidia/blueprint/rag-server"
+    tag: "2.3.0"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  resources:
+    requests:
+      memory: "8Gi"
+      cpu: "4"
+    limits:
+      memory: "64Gi"
+      cpu: "8"
+  service:
+    type: ClusterIP
+    port: 8081
+  config:
+    llm:
+      serverUrl: ""
+      # modelName is auto-detected from NIM at startup
+      maxTokens: 32768
+      temperature: 0
+      topP: 1.0
+    embedding:
+      serverUrl: ""
+      # modelName is auto-detected from NIM at startup
+      dimensions: 2048
+    reranker:
+      enabled: true
+      serverUrl: ""
+      # modelName is auto-detected from NIM at startup
+      confidenceThreshold: 0.0
+    vectorStore:
+      url: ""
+      name: "milvus"
+      indexType: "GPU_CAGRA"
+      searchType: "dense"
+      enableGpuSearch: true
+      enableGpuIndex: true
+      topK: 100
+    retriever:
+      topK: 10
+      scoreThreshold: 0.25
+    features:
+      enableReranker: true
+      enableCitations: true
+      enableSourceMetadata: true
+      enableGuardrails: false
+      enableVlmInference: false
+      enableReflection: false
+      enableQueryDecomposition: false
+      filterThinkTokens: true
+    tracing:
+      enabled: false
+      otlpHttpEndpoint: "http://otel-collector:4318/v1/traces"
+
+# Ingestor Server Configuration
+ingestorServer:
+  enabled: true
+  image:
+    repository: "nvcr.io/nvidia/blueprint/ingestor-server"
+    tag: "2.3.0"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  resources:
+    requests:
+      memory: "25Gi"
+      cpu: "4"
+    limits:
+      memory: "25Gi"
+      cpu: "8"
+  service:
+    type: ClusterIP
+    port: 8082
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: "100Gi"
+    accessMode: "ReadWriteOnce"
+  config:
+    nvIngest:
+      hostname: "rag-nv-ingest"
+      port: 7670
+    summary:
+      llm: "nvidia/llama-3.3-nemotron-super-49b-v1.5"
+      serverUrl: ""
+      maxChunkLength: 9000
+      chunkOverlap: 400
+      temperature: 0.0
+      topP: 1.0
+      maxParallelization: 20
+
+# NV-Ingest Runtime Configuration
+nvIngest:
+  enabled: true
+  image:
+    repository: "nvcr.io/nvidia/nemo-microservices/nv-ingest"
+    tag: "25.3.0"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  resources:
+    requests:
+      memory: "16Gi"
+      cpu: "8"
+    limits:
+      memory: "32Gi"
+      cpu: "16"
+      nvidia.com/gpu: 0
+  service:
+    type: ClusterIP
+    httpPort: 7670
+    brokerPort: 7671
+  cloudNims:
+    ocr:
+      endpoint: "https://ai.api.nvidia.com/v1/cv/nvidia/nemoretriever-ocr"
+      protocol: "http"
+      modelName: "scene_text_ensemble"
+    pageElements:
+      # nv-ingest 25.3.0 requires v2 (v3 returns 'infographic' label not supported)
+      endpoint: "https://ai.api.nvidia.com/v1/cv/nvidia/nemoretriever-page-elements-v2"
+      protocol: "http"
+    graphicElements:
+      endpoint: "https://ai.api.nvidia.com/v1/cv/nvidia/nemoretriever-graphic-elements-v1"
+      protocol: "http"
+    tableStructure:
+      endpoint: "https://ai.api.nvidia.com/v1/cv/nvidia/nemoretriever-table-structure-v1"
+      protocol: "http"
+    # NemoRetriever Parse (for PDF extraction with VLM)
+    nemoretrieverParse:
+      endpoint: "https://integrate.api.nvidia.com/v1/chat/completions"
+      protocol: "http"
+      modelName: "nvidia/llama-3.2-90b-vision-instruct"
+    # PaddleOCR (for table extraction)
+    paddle:
+      endpoint: "https://ai.api.nvidia.com/v1/cv/nvidia/nemoretriever-ocr"
+      protocol: "http"
+    # Audio transcription
+    audio:
+      endpoint: "https://integrate.api.nvidia.com/v1/audio/transcriptions"
+      protocol: "http"
+  config:
+    extraction:
+      text: true
+      tables: true
+      charts: true
+      infographics: false
+      images: false
+      pageAsImage: false
+      textDepth: "page"
+    pdf:
+      enableSplitter: true
+      extractMethod: "None"
+      splitPageCount: 32
+    chunking:
+      size: 512
+      overlap: 150
+    performance:
+      maxWorkers: 4
+      filesPerBatch: 16
+      concurrentBatches: 4
+      maxUtil: 16
+      defaultCpuCount: 4  # Fix for nv-ingest 25.3.0 bug
+
+# Frontend Configuration
+frontend:
+  enabled: true
+  image:
+    repository: "nvcr.io/nvidia/blueprint/rag-frontend"
+    tag: "2.3.0"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1"
+  service:
+    type: LoadBalancer
+    port: 3000
+  config:
+    chatUrl: "/v1"
+    vdbUrl: "/v1"
+  ingress:
+    enabled: false
+    className: "alb"
+    annotations:
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+    hosts:
+      - host: ""
+        paths:
+          - path: /
+            pathType: Prefix

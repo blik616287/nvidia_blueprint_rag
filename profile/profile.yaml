@@ -1,0 +1,165 @@
+# NVIDIA RAG Blueprint Profile
+# Profile Name: nvidia-rag-blueprint-from-cluster
+# Cluster: test2
+#
+# This profile deploys the complete NVIDIA RAG (Retrieval Augmented Generation)
+# pipeline on Kubernetes with GPU support.
+
+apiVersion: v1
+kind: ClusterProfile
+metadata:
+  name: nvidia-rag-blueprint-from-cluster
+  description: NVIDIA RAG Blueprint with dynamic model selection and cloud NIM integration
+
+spec:
+  # Profile type: cluster (full stack) or infra (infrastructure only)
+  type: cluster
+
+  # Cloud provider compatibility
+  cloudTypes:
+    - all
+
+  packs:
+    # =========================================================================
+    # Pack 1: Data Infrastructure (Install Priority: 10)
+    # Deploys: Milvus, etcd, MinIO, Redis
+    # GPU: 1 (Milvus uses GPU for vector indexing)
+    # =========================================================================
+    - name: nvidia-rag-data-infrastructure
+      type: addon
+      version: "1.0.10"
+      values: |
+        charts:
+          nvidia-rag-data-infrastructure:
+            global:
+              namespace: "nvidia-rag"
+              storageClass: ""
+            milvus:
+              enabled: true
+              standalone:
+                resources:
+                  limits:
+                    nvidia.com/gpu: 1
+            etcd:
+              enabled: true
+            minio:
+              enabled: true
+              auth:
+                rootUser: "{{.spectro.var.MINIO_ACCESS_KEY}}"
+                rootPassword: "{{.spectro.var.MINIO_SECRET_KEY}}"
+            redis:
+              enabled: true
+
+    # =========================================================================
+    # Pack 2: Core NIMs (Install Priority: 11)
+    # Deploys: LLM NIM, Embedding NIM, Reranker NIM
+    # GPU: 3 (1 per NIM service)
+    # =========================================================================
+    - name: nvidia-rag-core-nims
+      type: addon
+      version: "1.0.8"
+      values: |
+        charts:
+          nvidia-rag-core-nims:
+            global:
+              namespace: "nvidia-rag"
+              storageClass: ""
+              ngcApiKey: "{{.spectro.var.NGC_API_KEY}}"
+              nvidiaApiKey: "{{.spectro.var.NVIDIA_API_KEY}}"
+            llm:
+              enabled: true
+              useCloud: false
+              dynamicModelSelection:
+                enabled: true
+                maxGpuCount: 1
+            embedding:
+              enabled: true
+              useCloud: false
+            reranker:
+              enabled: true
+              useCloud: false
+
+    # =========================================================================
+    # Pack 3: RAG Application (Install Priority: 12)
+    # Deploys: RAG Server, Ingestor Server, NV-Ingest, Frontend
+    # GPU: 0 (uses cloud NIMs for document processing)
+    # =========================================================================
+    - name: nvidia-rag-application
+      type: addon
+      version: "1.0.14"
+      values: |
+        charts:
+          nvidia-rag-application:
+            global:
+              namespace: "nvidia-rag"
+              ngcApiKey: "{{.spectro.var.NGC_API_KEY}}"
+              minio:
+                accessKey: "{{.spectro.var.MINIO_ACCESS_KEY}}"
+                secretKey: "{{.spectro.var.MINIO_SECRET_KEY}}"
+            ragServer:
+              enabled: true
+            ingestorServer:
+              enabled: true
+            nvIngest:
+              enabled: true
+              cloudNims:
+                pageElements:
+                  # nv-ingest 25.3.0 requires v2 endpoint
+                  endpoint: "https://ai.api.nvidia.com/v1/cv/nvidia/nemoretriever-page-elements-v2"
+            frontend:
+              enabled: true
+              service:
+                type: LoadBalancer
+
+    # =========================================================================
+    # Pack 4: Guardrails (Optional - Install Priority: 13)
+    # Deploys: NeMo Guardrails service
+    # GPU: 0 (uses cloud NIMs)
+    # =========================================================================
+    # - name: nvidia-rag-guardrails
+    #   type: addon
+    #   version: "1.0.4"
+    #   values: |
+    #     charts:
+    #       nvidia-rag-guardrails:
+    #         enabled: false
+
+    # =========================================================================
+    # Pack 5: Observability (Optional - Install Priority: 14)
+    # Deploys: OpenTelemetry, Prometheus, Grafana
+    # GPU: 0
+    # =========================================================================
+    # - name: nvidia-rag-observability
+    #   type: addon
+    #   version: "1.0.5"
+    #   values: |
+    #     charts:
+    #       nvidia-rag-observability:
+    #         enabled: false
+
+  # Profile variables - values provided at cluster creation
+  variables:
+    - name: NGC_API_KEY
+      displayName: NGC API Key
+      description: NVIDIA NGC API key for pulling container images from nvcr.io
+      type: password
+      required: true
+
+    - name: NVIDIA_API_KEY
+      displayName: NVIDIA API Key
+      description: NVIDIA API key for cloud NIM access (ai.api.nvidia.com)
+      type: password
+      required: true
+
+    - name: MINIO_ACCESS_KEY
+      displayName: MinIO Access Key
+      description: Access key for MinIO object storage
+      type: string
+      required: true
+      default: "minioadmin"
+
+    - name: MINIO_SECRET_KEY
+      displayName: MinIO Secret Key
+      description: Secret key for MinIO object storage
+      type: password
+      required: true

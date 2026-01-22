@@ -1,0 +1,150 @@
+{{- if .Values.otelCollector.enabled }}
+---
+# OTEL Collector ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-otel-collector-config
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/instance: rag
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: {{ .Values.otelCollector.config.receivers.otlp.protocols.grpc.endpoint | quote }}
+          http:
+            endpoint: {{ .Values.otelCollector.config.receivers.otlp.protocols.http.endpoint | quote }}
+
+    extensions:
+      health_check:
+        endpoint: "0.0.0.0:{{ .Values.otelCollector.service.ports.health }}"
+
+    processors:
+      batch:
+        timeout: {{ .Values.otelCollector.config.processors.batch.timeout }}
+        send_batch_size: {{ .Values.otelCollector.config.processors.batch.send_batch_size }}
+      tail_sampling:
+        policies:
+          - name: filter_health_checks
+            type: string_attribute
+            string_attribute:
+              key: http.url
+              values: ["/health", "/health/ready", "/healthz"]
+              enabled_regex_matching: false
+              invert_match: true
+
+    exporters:
+      {{- if .Values.zipkin.enabled }}
+      zipkin:
+        endpoint: {{ .Values.otelCollector.config.exporters.zipkin.endpoint | quote }}
+      {{- end }}
+      prometheus:
+        endpoint: {{ .Values.otelCollector.config.exporters.prometheus.endpoint | quote }}
+      debug:
+        verbosity: {{ .Values.otelCollector.config.exporters.debug.verbosity }}
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch, tail_sampling]
+          exporters: [{{- if .Values.zipkin.enabled }}zipkin, {{- end }}debug]
+        metrics:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [prometheus, debug]
+        logs:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [debug]
+---
+# OTEL Collector Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-otel-collector
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/instance: rag
+spec:
+  replicas: {{ .Values.otelCollector.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otel-collector
+      app.kubernetes.io/instance: rag
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: otel-collector
+        app.kubernetes.io/instance: rag
+    spec:
+      containers:
+        - name: otel-collector
+          image: "{{ .Values.otelCollector.image.repository }}:{{ .Values.otelCollector.image.tag }}"
+          imagePullPolicy: {{ .Values.otelCollector.image.pullPolicy }}
+          command:
+            - /otelcol-contrib
+            - --config=/etc/otel-collector-config.yaml
+          ports:
+            - name: otlp-grpc
+              containerPort: {{ .Values.otelCollector.service.ports.otlpGrpc }}
+            - name: otlp-http
+              containerPort: {{ .Values.otelCollector.service.ports.otlpHttp }}
+            - name: prometheus
+              containerPort: {{ .Values.otelCollector.service.ports.prometheus }}
+            - name: health
+              containerPort: {{ .Values.otelCollector.service.ports.health }}
+          resources:
+            {{- toYaml .Values.otelCollector.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otel-collector-config.yaml
+              subPath: otel-collector-config.yaml
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: rag-otel-collector-config
+---
+# OTEL Collector Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-otel-collector
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/instance: rag
+spec:
+  type: {{ .Values.otelCollector.service.type }}
+  ports:
+    - name: otlp-grpc
+      port: {{ .Values.otelCollector.service.ports.otlpGrpc }}
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: {{ .Values.otelCollector.service.ports.otlpHttp }}
+      targetPort: otlp-http
+    - name: prometheus
+      port: {{ .Values.otelCollector.service.ports.prometheus }}
+      targetPort: prometheus
+  selector:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/instance: rag
+{{- end }}

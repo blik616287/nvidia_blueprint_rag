@@ -1,0 +1,15 @@
+apiVersion: v2
+appVersion: 1.0.0
+description: NVIDIA RAG Observability - OTEL Collector, Zipkin, Prometheus, and Grafana
+keywords:
+- nvidia
+- observability
+- otel
+- prometheus
+- grafana
+- zipkin
+maintainers:
+- name: spectrocloud
+name: nvidia-rag-observability
+type: application
+version: 1.0.4

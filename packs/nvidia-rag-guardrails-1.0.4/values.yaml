@@ -1,0 +1,76 @@
+# NVIDIA RAG Guardrails Pack Values
+# Deploys NeMo Guardrails with Content Safety and Topic Control
+
+pack:
+  namespace: nvidia-rag
+  spectrocloud.com/install-priority: "13"
+  content:
+    images:
+      - image: nvcr.io/nvidia/nemo-microservices/guardrails:25.09
+      - image: nvcr.io/nim/nvidia/llama-3.1-nemoguard-8b-content-safety:1.10.1
+      - image: nvcr.io/nim/nvidia/llama-3.1-nemoguard-8b-topic-control:1.10
+
+# Helm chart values
+charts:
+  nvidia-rag-guardrails:
+    global:
+      namespace: "nvidia-rag"
+      ngcApiKey: "{{.spectro.var.NGC_API_KEY}}"
+      imagePullSecrets:
+        - name: ngc-pull-secret
+
+    # Guardrails service
+    guardrails:
+      enabled: true
+      image:
+        repository: "nvcr.io/nvidia/nemo-microservices/guardrails"
+        tag: "25.09"
+        pullPolicy: IfNotPresent
+      replicaCount: 1
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+        limits:
+          memory: "4Gi"
+          cpu: "2"
+      service:
+        type: ClusterIP
+        port: 7331
+      configStore:
+        defaultConfigId: "nemoguard_cloud"
+
+    # Cloud NIM endpoints (no GPU required)
+    cloudNims:
+      enabled: true
+      endpoint: "https://integrate.api.nvidia.com/v1"
+      contentSafety:
+        enabled: true
+        model: "nvidia/llama-3.1-nemoguard-8b-content-safety"
+      topicControl:
+        enabled: true
+        model: "nvidia/llama-3.1-nemoguard-8b-topic-control"
+
+    # On-prem NIM configuration (requires additional GPUs)
+    onPremNims:
+      enabled: false
+      contentSafety:
+        enabled: false
+        image:
+          repository: "nvcr.io/nim/nvidia/llama-3.1-nemoguard-8b-content-safety"
+          tag: "1.10.1"
+        resources:
+          limits:
+            nvidia.com/gpu: 1
+        service:
+          port: 8000
+      topicControl:
+        enabled: false
+        image:
+          repository: "nvcr.io/nim/nvidia/llama-3.1-nemoguard-8b-topic-control"
+          tag: "1.10"
+        resources:
+          limits:
+            nvidia.com/gpu: 1
+        service:
+          port: 8000
