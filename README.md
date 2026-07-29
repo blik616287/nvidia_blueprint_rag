@@ -196,3 +196,7 @@ helm template . -f ../../values.yaml
 All NVIDIA images are pulled from `nvcr.io` and require authentication via `ngc-pull-secret`. The secret is created by the `nvidia-rag-core-nims` pack using the `NGC_API_KEY` variable.
 
 Third-party images (Milvus, Redis, MinIO, etc.) are pulled from public registries.
+
+## License
+
+[MIT](LICENSE) © 2026 Martin Forde <mforde84@gmail.com>, [Blik Labs](https://bliklabs.com).
